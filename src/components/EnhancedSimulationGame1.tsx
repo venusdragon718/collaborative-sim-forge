@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,36 +9,36 @@ import { Textarea } from "@/components/ui/textarea";
 import PieChart from './PieChart';
 import FactorScoreSlider from './FactorScoreSlider';
 
-interface Game1Data {
-  team1: {
-    ebitda: number;
-    interestRate: number;
-    multiple: number;
-    factorScore: number;
-    companyName: string;
-    description: string;
-  };
-  team2: {
-    ebitdaApproval: string;
-    interestRateApproval: string;
-    multipleApproval: string;
-    factorScoreApproval: string;
-    companyNameApproval: string;
-    descriptionApproval: string;
-  };
-}
-
 interface EnhancedSimulationGame1Props {
-  gameData: Game1Data;
   selectedTeam: 1 | 2;
-  onUpdateData: (team: 'team1' | 'team2', data: any) => void;
+  sessionId: string;
+  simulation: any;
 }
 
 const EnhancedSimulationGame1: React.FC<EnhancedSimulationGame1Props> = ({ 
-  gameData, 
   selectedTeam, 
-  onUpdateData 
+  sessionId,
+  simulation
 }) => {
+  const [gameData, setGameData] = useState({
+    team1: {
+      ebitda: 10,
+      interest_rate: 20,
+      multiple: 10,
+      factor_score: 2,
+      company_name: 'ABC Corp.',
+      description: 'This is the company\'s description. This company is B2B'
+    },
+    team2: {
+      ebitda_approval: 'TBD',
+      interest_rate_approval: 'OK',
+      multiple_approval: 'TBD',
+      factor_score_approval: 'OK',
+      company_name_approval: 'TBD',
+      description_approval: 'TBD'
+    }
+  });
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -53,37 +53,94 @@ const EnhancedSimulationGame1: React.FC<EnhancedSimulationGame1Props> = ({
     if (!allApproved) {
       return { value: "Not yet agreed by Team 2", percentage: 20 };
     }
-    const valuation = gameData.team1.ebitda * gameData.team1.multiple * gameData.team1.factorScore;
+    const valuation = gameData.team1.ebitda * gameData.team1.multiple * gameData.team1.factor_score;
     const percentage = Math.min(Math.max((valuation / 1000000000) * 100, 10), 90);
     return { value: formatCurrency(valuation), percentage: Math.round(percentage) };
   };
 
-  const handleTeam1Change = (field: string, value: string | number) => {
-    const processedValue = typeof value === 'string' && field !== 'companyName' && field !== 'description'
-      ? (field === 'interestRate' ? parseFloat(value) : parseInt(value) || 0)
+  const handleTeam1Change = async (field: string, value: string | number) => {
+    const processedValue = typeof value === 'string' && field !== 'company_name' && field !== 'description'
+      ? (field === 'interest_rate' ? parseFloat(value) : parseInt(value) || 0)
       : value;
     
-    onUpdateData('team1', { [field]: processedValue });
-    
-    // Reset corresponding approval
-    const approvalMap: { [key: string]: string } = {
-      ebitda: 'ebitdaApproval',
-      interestRate: 'interestRateApproval',
-      multiple: 'multipleApproval',
-      factorScore: 'factorScoreApproval',
-      companyName: 'companyNameApproval',
-      description: 'descriptionApproval'
-    };
-    
-    if (approvalMap[field]) {
-      onUpdateData('team2', { [approvalMap[field]]: 'TBD' });
+    // Update local state immediately for better UX
+    setGameData(prev => ({
+      ...prev,
+      team1: {
+        ...prev.team1,
+        [field]: processedValue
+      }
+    }));
+
+    try {
+      // Map frontend field names to backend field names
+      const fieldMapping: { [key: string]: string } = {
+        ebitda: 'ebitda',
+        interestRate: 'interest_rate',
+        multiple: 'multiple',
+        factorScore: 'factor_score',
+        companyName: 'company_name',
+        description: 'description'
+      };
+
+      const backendField = fieldMapping[field] || field;
+      
+      await simulation.updateGame1Input(selectedTeam, { 
+        [backendField]: processedValue 
+      });
+
+      // Reset corresponding approval in local state
+      const approvalMap: { [key: string]: string } = {
+        ebitda: 'ebitda_approval',
+        interestRate: 'interest_rate_approval',
+        multiple: 'multiple_approval',
+        factorScore: 'factor_score_approval',
+        companyName: 'company_name_approval',
+        description: 'description_approval'
+      };
+      
+      if (approvalMap[field]) {
+        setGameData(prev => ({
+          ...prev,
+          team2: {
+            ...prev.team2,
+            [approvalMap[field]]: 'TBD'
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to update input:', error);
     }
   };
 
-  const handleTeam2Toggle = (field: string) => {
+  const handleTeam2Toggle = async (field: string) => {
     const currentValue = gameData.team2[field as keyof typeof gameData.team2];
     const newValue = currentValue === 'TBD' ? 'OK' : 'TBD';
-    onUpdateData('team2', { [field]: newValue });
+    
+    // Update local state immediately
+    setGameData(prev => ({
+      ...prev,
+      team2: {
+        ...prev.team2,
+        [field]: newValue
+      }
+    }));
+
+    try {
+      await simulation.updateGame1Approval(selectedTeam, { 
+        [field]: newValue 
+      });
+    } catch (error) {
+      console.error('Failed to update approval:', error);
+      // Revert local state on error
+      setGameData(prev => ({
+        ...prev,
+        team2: {
+          ...prev.team2,
+          [field]: currentValue
+        }
+      }));
+    }
   };
 
   const valuation = calculateValuation();
@@ -112,16 +169,16 @@ const EnhancedSimulationGame1: React.FC<EnhancedSimulationGame1Props> = ({
                 <span className="text-xs text-gray-500 ml-2">million</span>
               </div>
               <div className="flex items-center space-x-2">
-                <Badge variant={gameData.team2.ebitdaApproval === 'OK' ? 'default' : 'secondary'}>
-                  {gameData.team2.ebitdaApproval}
+                <Badge variant={gameData.team2.ebitda_approval === 'OK' ? 'default' : 'secondary'}>
+                  {gameData.team2.ebitda_approval}
                 </Badge>
                 {selectedTeam === 2 && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleTeam2Toggle('ebitdaApproval')}
+                    onClick={() => handleTeam2Toggle('ebitda_approval')}
                   >
-                    {gameData.team2.ebitdaApproval === 'TBD' ? 'OK' : 'TBD'}
+                    {gameData.team2.ebitda_approval === 'TBD' ? 'OK' : 'TBD'}
                   </Button>
                 )}
               </div>
@@ -135,7 +192,7 @@ const EnhancedSimulationGame1: React.FC<EnhancedSimulationGame1Props> = ({
                   id="interestRate"
                   type="number"
                   step="0.1"
-                  value={gameData.team1.interestRate}
+                  value={gameData.team1.interest_rate}
                   onChange={(e) => handleTeam1Change('interestRate', e.target.value)}
                   disabled={selectedTeam !== 1}
                   className="mt-1 w-20"
@@ -143,16 +200,16 @@ const EnhancedSimulationGame1: React.FC<EnhancedSimulationGame1Props> = ({
                 <span className="text-xs text-gray-500 ml-2">%</span>
               </div>
               <div className="flex items-center space-x-2">
-                <Badge variant={gameData.team2.interestRateApproval === 'OK' ? 'default' : 'secondary'}>
-                  {gameData.team2.interestRateApproval}
+                <Badge variant={gameData.team2.interest_rate_approval === 'OK' ? 'default' : 'secondary'}>
+                  {gameData.team2.interest_rate_approval}
                 </Badge>
                 {selectedTeam === 2 && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleTeam2Toggle('interestRateApproval')}
+                    onClick={() => handleTeam2Toggle('interest_rate_approval')}
                   >
-                    {gameData.team2.interestRateApproval === 'TBD' ? 'OK' : 'TBD'}
+                    {gameData.team2.interest_rate_approval === 'TBD' ? 'OK' : 'TBD'}
                   </Button>
                 )}
               </div>
@@ -173,16 +230,16 @@ const EnhancedSimulationGame1: React.FC<EnhancedSimulationGame1Props> = ({
                 <span className="text-xs text-gray-500 ml-2">x</span>
               </div>
               <div className="flex items-center space-x-2">
-                <Badge variant={gameData.team2.multipleApproval === 'OK' ? 'default' : 'secondary'}>
-                  {gameData.team2.multipleApproval}
+                <Badge variant={gameData.team2.multiple_approval === 'OK' ? 'default' : 'secondary'}>
+                  {gameData.team2.multiple_approval}
                 </Badge>
                 {selectedTeam === 2 && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleTeam2Toggle('multipleApproval')}
+                    onClick={() => handleTeam2Toggle('multiple_approval')}
                   >
-                    {gameData.team2.multipleApproval === 'TBD' ? 'OK' : 'TBD'}
+                    {gameData.team2.multiple_approval === 'TBD' ? 'OK' : 'TBD'}
                   </Button>
                 )}
               </div>
@@ -194,23 +251,23 @@ const EnhancedSimulationGame1: React.FC<EnhancedSimulationGame1Props> = ({
                 <Label className="text-sm font-medium">Factor Score:</Label>
                 <div className="mt-2">
                   <FactorScoreSlider
-                    value={gameData.team1.factorScore}
+                    value={gameData.team1.factor_score}
                     onChange={(value) => handleTeam1Change('factorScore', value)}
                     disabled={selectedTeam !== 1}
                   />
                 </div>
               </div>
               <div className="flex items-center space-x-2">
-                <Badge variant={gameData.team2.factorScoreApproval === 'OK' ? 'default' : 'secondary'}>
-                  {gameData.team2.factorScoreApproval}
+                <Badge variant={gameData.team2.factor_score_approval === 'OK' ? 'default' : 'secondary'}>
+                  {gameData.team2.factor_score_approval}
                 </Badge>
                 {selectedTeam === 2 && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleTeam2Toggle('factorScoreApproval')}
+                    onClick={() => handleTeam2Toggle('factor_score_approval')}
                   >
-                    {gameData.team2.factorScoreApproval === 'TBD' ? 'OK' : 'TBD'}
+                    {gameData.team2.factor_score_approval === 'TBD' ? 'OK' : 'TBD'}
                   </Button>
                 )}
               </div>
@@ -223,23 +280,23 @@ const EnhancedSimulationGame1: React.FC<EnhancedSimulationGame1Props> = ({
                 <Input
                   id="companyName"
                   type="text"
-                  value={gameData.team1.companyName}
+                  value={gameData.team1.company_name}
                   onChange={(e) => handleTeam1Change('companyName', e.target.value)}
                   disabled={selectedTeam !== 1}
                   className="mt-1"
                 />
               </div>
               <div className="flex items-center space-x-2">
-                <Badge variant={gameData.team2.companyNameApproval === 'OK' ? 'default' : 'secondary'}>
-                  {gameData.team2.companyNameApproval}
+                <Badge variant={gameData.team2.company_name_approval === 'OK' ? 'default' : 'secondary'}>
+                  {gameData.team2.company_name_approval}
                 </Badge>
                 {selectedTeam === 2 && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleTeam2Toggle('companyNameApproval')}
+                    onClick={() => handleTeam2Toggle('company_name_approval')}
                   >
-                    {gameData.team2.companyNameApproval === 'TBD' ? 'OK' : 'TBD'}
+                    {gameData.team2.company_name_approval === 'TBD' ? 'OK' : 'TBD'}
                   </Button>
                 )}
               </div>
@@ -259,16 +316,16 @@ const EnhancedSimulationGame1: React.FC<EnhancedSimulationGame1Props> = ({
                 />
               </div>
               <div className="flex items-center space-x-2 ml-4">
-                <Badge variant={gameData.team2.descriptionApproval === 'OK' ? 'default' : 'secondary'}>
-                  {gameData.team2.descriptionApproval}
+                <Badge variant={gameData.team2.description_approval === 'OK' ? 'default' : 'secondary'}>
+                  {gameData.team2.description_approval}
                 </Badge>
                 {selectedTeam === 2 && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleTeam2Toggle('descriptionApproval')}
+                    onClick={() => handleTeam2Toggle('description_approval')}
                   >
-                    {gameData.team2.descriptionApproval === 'TBD' ? 'OK' : 'TBD'}
+                    {gameData.team2.description_approval === 'TBD' ? 'OK' : 'TBD'}
                   </Button>
                 )}
               </div>

@@ -1,54 +1,90 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-interface Game2Data {
-  team1: {
-    pricing: { company1: number; company2: number; company3: number };
-    shares: { company1: number; company2: number; company3: number };
-  };
-  team2: {
-    sharesBid: {
-      investor1: { company1: number; company2: number; company3: number };
-      investor2: { company1: number; company2: number; company3: number };
-      investor3: { company1: number; company2: number; company3: number };
-    };
-  };
-}
-
 interface SimulationGame2Props {
-  gameData: Game2Data;
   selectedTeam: 1 | 2;
-  onUpdateData: (team: 'team1' | 'team2', data: any) => void;
+  sessionId: string;
+  simulation: any;
 }
 
-const SimulationGame2: React.FC<SimulationGame2Props> = ({ gameData, selectedTeam, onUpdateData }) => {
+const SimulationGame2: React.FC<SimulationGame2Props> = ({ selectedTeam, sessionId, simulation }) => {
+  const [gameData, setGameData] = useState({
+    team1: {
+      pricing: { company1: 4, company2: 12, company3: 15 },
+      shares: { company1: 10000, company2: 8000, company3: 5000 }
+    },
+    team2: {
+      sharesBid: {
+        investor1: { company1: 1000, company2: 4000, company3: 1300 },
+        investor2: { company1: 1500, company2: 2000, company3: 4000 },
+        investor3: { company1: 6000, company2: 1000, company3: 1000 }
+      }
+    }
+  });
+
   const companies = ['company1', 'company2', 'company3'];
   const companyNames = ['Company 1', 'Company 2', 'Company 3'];
 
-  const handleTeam1Change = (field: 'pricing' | 'shares', company: string, value: string) => {
+  const handleTeam1Change = async (field: 'pricing' | 'shares', company: string, value: string) => {
     const numValue = parseInt(value) || 0;
-    onUpdateData('team1', {
-      [field]: {
-        ...gameData.team1[field],
-        [company]: numValue
-      }
-    });
-  };
-
-  const handleTeam2Change = (investor: string, company: string, value: string) => {
-    const numValue = parseInt(value) || 0;
-    onUpdateData('team2', {
-      sharesBid: {
-        ...gameData.team2.sharesBid,
-        [investor]: {
-          ...gameData.team2.sharesBid[investor as keyof typeof gameData.team2.sharesBid],
+    
+    // Update local state immediately
+    setGameData(prev => ({
+      ...prev,
+      team1: {
+        ...prev.team1,
+        [field]: {
+          ...prev.team1[field],
           [company]: numValue
         }
       }
-    });
+    }));
+
+    try {
+      // Map to backend field names
+      const backendData: any = {};
+      if (field === 'pricing') {
+        backendData[`${company}_price`] = numValue;
+      } else {
+        backendData[`${company}_shares`] = numValue;
+      }
+
+      await simulation.updateGame2Input(selectedTeam, backendData);
+    } catch (error) {
+      console.error('Failed to update team 1 data:', error);
+    }
+  };
+
+  const handleTeam2Change = async (investor: string, company: string, value: string) => {
+    const numValue = parseInt(value) || 0;
+    
+    // Update local state immediately
+    setGameData(prev => ({
+      ...prev,
+      team2: {
+        ...prev.team2,
+        sharesBid: {
+          ...prev.team2.sharesBid,
+          [investor]: {
+            ...prev.team2.sharesBid[investor as keyof typeof prev.team2.sharesBid],
+            [company]: numValue
+          }
+        }
+      }
+    }));
+
+    try {
+      const backendData = {
+        [`${investor}_${company}_bid`]: numValue
+      };
+
+      await simulation.updateGame2Bids(selectedTeam, backendData);
+    } catch (error) {
+      console.error('Failed to update team 2 bids:', error);
+    }
   };
 
   const calculateOutputs = () => {
